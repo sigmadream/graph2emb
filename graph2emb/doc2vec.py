@@ -399,7 +399,7 @@ class Doc2Vec:
         doc_idx: int,
     ):
         """Train PV-DBOW pair."""
-        word_vec = word_vectors[word_idx] if self.dbow_words else word_vectors[word_idx]
+        word_vec = word_vectors[word_idx]
         dot = np.dot(doc_vec, word_vec)
 
         if label == 1:

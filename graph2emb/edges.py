@@ -8,7 +8,6 @@ from tqdm import tqdm
 
 
 class EdgeEmbedder(ABC):
-    INDEX_MAPPING_KEY = "index_to_key"
 
     def __init__(self, keyed_vectors: KeyedVectors, quiet: bool = False):
         """
@@ -31,10 +30,10 @@ class EdgeEmbedder(ABC):
         if not isinstance(edge, tuple) or not len(edge) == 2:
             raise ValueError("edge must be a tuple of two nodes")
 
-        if edge[0] not in getattr(self.kv, self.INDEX_MAPPING_KEY):
+        if edge[0] not in self.kv.index_to_key:
             raise KeyError("node {} does not exist in given KeyedVectors".format(edge[0]))
 
-        if edge[1] not in getattr(self.kv, self.INDEX_MAPPING_KEY):
+        if edge[1] not in self.kv.index_to_key:
             raise KeyError("node {} does not exist in given KeyedVectors".format(edge[1]))
 
         return self._embed(edge)
@@ -45,10 +44,10 @@ class EdgeEmbedder(ABC):
         :return: Edge embeddings
         """
 
-        edge_generator = combinations_with_replacement(getattr(self.kv, self.INDEX_MAPPING_KEY), r=2)
+        edge_generator = combinations_with_replacement(self.kv.index_to_key, r=2)
 
         if not self.quiet:
-            vocab_size = len(getattr(self.kv, self.INDEX_MAPPING_KEY))
+            vocab_size = len(self.kv.index_to_key)
             total_size = reduce(lambda x, y: x * y, range(1, vocab_size + 2)) / (
                 2 * reduce(lambda x, y: x * y, range(1, vocab_size))
             )
@@ -106,5 +105,3 @@ class WeightedL2Embedder(EdgeEmbedder):
 
     def _embed(self, edge: tuple):
         return (self.kv[edge[0]] - self.kv[edge[1]]) ** 2
-
-

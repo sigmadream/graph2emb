@@ -1,6 +1,7 @@
 import os
 import random
 from collections import defaultdict
+from itertools import chain
 
 import networkx as nx
 import numpy as np
@@ -185,7 +186,7 @@ class Node2Vec:
                         edge = list(self.graph[current_node][destination])[-1]
                         weight = self.graph[current_node][destination][edge].get(self.weight_key, 1)
 
-                except:
+                except Exception:
                     weight = 1
 
                 if destination == source:  # Backwards probability
@@ -209,7 +210,7 @@ class Node2Vec:
         for destination in self.graph.neighbors(source):
             try:
                 weight = self.graph[source][destination].get(self.weight_key, 1)
-            except:
+            except Exception:
                 weight = 1
             first_travel_weights.append(weight)
 
@@ -224,8 +225,6 @@ class Node2Vec:
         Generates the random walks which will be used as the skip-gram input.
         :return: List of walks. Each walk is a list of nodes.
         """
-
-        flatten = lambda l: [item for sublist in l for item in sublist]
 
         # Split num_walks for each worker
         num_walks_lists = np.array_split(range(self.num_walks), self.workers)
@@ -247,7 +246,7 @@ class Node2Vec:
             for idx, num_walks in enumerate(num_walks_lists, 1)
         )
 
-        walks = flatten(walk_results)
+        walks = list(chain.from_iterable(walk_results))
 
         return walks
 

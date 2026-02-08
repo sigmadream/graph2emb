@@ -34,7 +34,7 @@ def parallel_precompute_probabilities(source, graph, p, q, weight_key, sampling_
                     # Example: AtlasView({0: {'type': 1, 'weight':0.1}}) - when we have edge weight
                     edge = list(graph[current_node][destination])[-1]
                     weight = graph[current_node][destination][edge].get(weight_key, 1)
-            except:
+            except Exception:
                 weight = 1
 
             if destination == source:  # Backwards probability
