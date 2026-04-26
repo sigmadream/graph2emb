@@ -1,59 +1,77 @@
 # graph2emb
 
-> [Elior Cohen의 node2vec](https://github.com/eliorc/node2vec), [graph2vec](https://github.com/benedekrozemberczki/graph2vec)를 참고해 Node2Vec + Graph2Vec 기능을 한 프로젝트로 합친 구현체입니다.
+`graph2emb` is a lightweight Python package for learning graph embeddings. It combines Node2Vec-style random-walk node embeddings, edge embeddings, and Graph2Vec-style whole-graph embeddings in one project.
 
-## 특징
+The implementation is inspired by:
 
-- Node2Vec: 랜덤 워크 기반 노드 임베딩
-- Edge embedding: (Hadamard/평균/L1/L2) 방식의 엣지 임베딩
-- Graph2Vec: WL(Weisfeiler–Lehman) hashing + Doc2Vec 기반 그래프 임베딩
-- uv 기반 개발/실행
+- [Elior Cohen's node2vec](https://github.com/eliorc/node2vec)
+- [graph2vec](https://github.com/benedekrozemberczki/graph2vec)
 
-> 파이썬 모듈 이름은 `graph2emb` 입니다.
+## Features
 
-## 빠른 시작 (sample 실행)
+- Node2Vec: random-walk based node embeddings.
+- Edge embeddings: Hadamard, average, weighted L1, and weighted L2 edge representations.
+- Graph2Vec: Weisfeiler-Lehman hashing + Doc2Vec-based graph embeddings.
+- Gensim-like APIs: small in-repo `Word2Vec`, `Doc2Vec`, and `KeyedVectors` implementations.
+- uv-friendly workflow for development, testing, and running examples.
+
+## Installation
+
+From the project root:
 
 ```bash
-# 의존성/프로젝트 설치
-uv sync
-
-# Node2Vec (edge list 로드)
-uv run python sample/node2vec_from_edgelist.py
-
-# Node2Vec + edge embedding
-uv run python sample/node2vec_edge_embeddings.py
-
-# Graph2Vec
-uv run python sample/graph2vec_basic.py
+uv add graph2emb
 ```
 
-샘플 설명은 `sample/README.md`를 참고하세요.
+Or install the package in editable mode with pip:
 
-## 사용 예시 (코드)
+```bash
+pip install graph2emb
+```
 
-### Node2Vec (노드 임베딩)
+## Quick start
+
+### Node embeddings with Node2Vec
 
 ```python
 import networkx as nx
 from graph2emb import Node2Vec
 
-g = nx.fast_gnp_random_graph(n=100, p=0.3, seed=42)
-node2vec = Node2Vec(g, dimensions=64, walk_length=30, num_walks=20, workers=1, seed=42)
+# Build a small graph.
+graph = nx.fast_gnp_random_graph(n=100, p=0.3, seed=42)
+
+# Precompute transition probabilities and generate random walks.
+node2vec = Node2Vec(
+    graph,
+    dimensions=64,
+    walk_length=30,
+    num_walks=20,
+    workers=1,
+    seed=42,
+    quiet=True,
+)
+
+# Train embeddings from the walks.
 model = node2vec.fit(window=10, min_count=1, epochs=5)
 
-print(model.wv.most_similar("2", topn=5))  # 노드 id는 문자열로 조회
+# Node ids are stored as strings.
+print(model.wv.most_similar("2", topn=5))
 ```
 
-### Edge embedding (엣지 임베딩)
+### Edge embeddings
 
 ```python
-from graph2emb.edges import HadamardEmbedder
+from graph2emb.edges import HadamardEmbedder, AverageEmbedder
 
-edges_embs = HadamardEmbedder(model.wv)
-print(edges_embs[("1", "2")])
+# Reuse a trained Node2Vec model.
+hadamard = HadamardEmbedder(model.wv, quiet=True)
+average = AverageEmbedder(model.wv, quiet=True)
+
+print(hadamard[("1", "2")])
+print(average[("1", "2")])
 ```
 
-### Graph2Vec (그래프 임베딩)
+### Graph embeddings with Graph2Vec
 
 ```python
 import networkx as nx
@@ -64,20 +82,60 @@ graphs = [
     nx.fast_gnp_random_graph(n=14, p=0.2, seed=2),
 ]
 
-g2v = Graph2Vec(dimensions=32, workers=1, min_count=1, epochs=3, seed=42)
-g2v.fit(graphs)
-emb = g2v.get_embedding()  # shape: (len(graphs), dimensions)
+graph2vec = Graph2Vec(
+    dimensions=32,
+    wl_iterations=2,
+    workers=1,
+    min_count=1,
+    epochs=3,
+    seed=42,
+)
+graph2vec.fit(graphs)
+
+embeddings = graph2vec.get_embedding()
+print(embeddings.shape)  # (2, 32)
 ```
 
-## 개발/테스트
+## Running the sample scripts
+
+The `sample/` directory contains small runnable examples with intentionally small parameters.
 
 ```bash
-# 테스트 실행
+# Node2Vec from an edge-list file
+uv run python sample/node2vec_from_edgelist.py
+
+# Node2Vec + edge embeddings
+uv run python sample/node2vec_edge_embeddings.py
+
+# Graph2Vec
+uv run python sample/graph2vec_basic.py
+```
+
+Outputs are written to `sample/out/`.
+
+## Notes
+
+- Node labels are converted to strings in generated walks and learned `KeyedVectors`.
+- Weighted Node2Vec graphs use the `weight` edge attribute by default. Override this with `weight_key="..."`.
+- Edge weights, `p`, and `q` must be finite positive numbers.
+- For `MultiGraph` inputs, parallel edge weights are validated and summed.
+
+## Development
+
+```bash
+# Run tests
 uv run pytest
 
-# 병렬 테스트
+# Run tests in parallel
 uv run pytest -n auto
 
-# 커버리지 포함 테스트 실행
-uv run pytest --cov=graph2emb --cov-report=html
+# Run coverage
+uv run pytest --cov=graph2emb --cov-report=term-missing
+
+# Build package artifacts
+uv build
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

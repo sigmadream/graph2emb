@@ -3,6 +3,66 @@ from tqdm import tqdm
 import numpy as np
 
 
+def validate_positive_number(value, name):
+    """Return value as float if it is finite and positive."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite positive number, got {value!r}") from exc
+
+    if not np.isfinite(number) or number <= 0:
+        raise ValueError(f"{name} must be a finite positive number, got {number!r}")
+
+    return number
+
+
+def get_sampling_value(sampling_strategy, node, key, default):
+    """Return a validated node-specific sampling value or the default."""
+    if node in sampling_strategy and key in sampling_strategy[node]:
+        return validate_positive_number(sampling_strategy[node][key], f"sampling_strategy[{node!r}][{key!r}]")
+
+    return default
+
+
+def get_edge_weight(graph, source, destination, weight_key):
+    """Return a finite positive edge weight, defaulting missing weights to 1.
+
+    For MultiGraphs, all parallel edge weights are validated and summed so the
+    effective transition weight is deterministic and uses every parallel edge.
+    """
+    edge_data = graph[source][destination]
+
+    if graph.is_multigraph():
+        if not edge_data:
+            return 1.0
+
+        return sum(
+            validate_positive_number(
+                attrs.get(weight_key, 1),
+                f"Edge weight for ({source!r}, {destination!r}, {edge_key!r})",
+            )
+            for edge_key, attrs in edge_data.items()
+        )
+
+    return validate_positive_number(
+        edge_data.get(weight_key, 1),
+        f"Edge weight for ({source!r}, {destination!r})",
+    )
+
+
+def normalize_probabilities(weights, context):
+    """Normalize transition weights and reject invalid probability totals."""
+    weights = np.array(weights, dtype=np.float64)
+    if weights.size == 0:
+        return weights
+
+    total = weights.sum()
+    if not np.isfinite(total) or total <= 0:
+        raise ValueError(f"Transition weights for {context} must sum to a finite positive value")
+
+    return weights / total
+
+
 def parallel_precompute_probabilities(source, graph, p, q, weight_key, sampling_strategy, PROBABILITIES_KEY):
     """
     Precomputes transition probabilities for a single source node.
@@ -24,18 +84,10 @@ def parallel_precompute_probabilities(source, graph, p, q, weight_key, sampling_
 
         # Calculate unnormalized weights
         for destination in graph.neighbors(current_node):
-            p_val = sampling_strategy[current_node].get("p", p) if current_node in sampling_strategy else p
-            q_val = sampling_strategy[current_node].get("q", q) if current_node in sampling_strategy else q
+            p_val = get_sampling_value(sampling_strategy, current_node, "p", p)
+            q_val = get_sampling_value(sampling_strategy, current_node, "q", q)
 
-            try:
-                if graph[current_node][destination].get(weight_key):
-                    weight = graph[current_node][destination].get(weight_key, 1)
-                else:
-                    # Example: AtlasView({0: {'type': 1, 'weight':0.1}}) - when we have edge weight
-                    edge = list(graph[current_node][destination])[-1]
-                    weight = graph[current_node][destination][edge].get(weight_key, 1)
-            except Exception:
-                weight = 1
+            weight = get_edge_weight(graph, current_node, destination, weight_key)
 
             if destination == source:  # Backwards probability
                 ss_weight = weight * 1 / p_val
@@ -48,20 +100,21 @@ def parallel_precompute_probabilities(source, graph, p, q, weight_key, sampling_
             unnormalized_weights.append(ss_weight)
 
         # Normalize
-        unnormalized_weights = np.array(unnormalized_weights)
-        result[current_node] = unnormalized_weights / unnormalized_weights.sum()
+        result[current_node] = normalize_probabilities(
+            unnormalized_weights,
+            context=f"transition from {source!r} through {current_node!r}",
+        )
 
     # Calculate first_travel weights for source
     first_travel_weights = []
     for destination in graph.neighbors(source):
-        try:
-            weight = graph[source][destination].get(weight_key, 1)
-        except:
-            weight = 1
+        weight = get_edge_weight(graph, source, destination, weight_key)
         first_travel_weights.append(weight)
 
-    first_travel_weights = np.array(first_travel_weights)
-    result["first_travel"] = first_travel_weights / first_travel_weights.sum()
+    result["first_travel"] = normalize_probabilities(
+        first_travel_weights,
+        context=f"first travel from {source!r}",
+    )
 
     # Save neighbors
     result["neighbors"] = list(graph.neighbors(source))
@@ -149,5 +202,3 @@ def parallel_generate_walks(
         pbar.close()
 
     return walks
-
-

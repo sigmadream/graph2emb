@@ -1,6 +1,6 @@
 [project]
 name = "graph2emb"
-version = "0.9.0"
+version = "1.0.0"
 description = "Implementation of the graph2vec algorithm"
 authors = [
     {name = "Sangkon Heo", email = "sigmadream@gmail.com"}

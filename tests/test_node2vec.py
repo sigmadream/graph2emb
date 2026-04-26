@@ -153,6 +153,155 @@ class TestNode2Vec:
         node2vec = Node2Vec(graph, dimensions=8, walk_length=3, num_walks=1, workers=1, quiet=True)
         
         assert len(node2vec.walks) > 0
+
+    @pytest.mark.parametrize("workers", [1, 2])
+    def test_multigraph_parallel_edge_weights_are_summed(self, workers):
+        """Parallel MultiGraph edges should contribute deterministically."""
+        graph = nx.MultiGraph()
+        graph.add_edge("a", "b", weight=2.0)
+        graph.add_edge("a", "b", weight=3.0)
+        graph.add_edge("a", "c", weight=5.0)
+
+        node2vec = Node2Vec(
+            graph,
+            dimensions=8,
+            walk_length=3,
+            num_walks=1,
+            workers=workers,
+            quiet=True,
+            weight_key="weight",
+            seed=42,
+        )
+
+        first_travel = node2vec.d_graph["a"][node2vec.FIRST_TRAVEL_KEY]
+        neighbors = node2vec.d_graph["a"][node2vec.NEIGHBORS_KEY]
+        probabilities = dict(zip(neighbors, first_travel))
+
+        assert np.isclose(probabilities["b"], 0.5)
+        assert np.isclose(probabilities["c"], 0.5)
+
+    @pytest.mark.parametrize("workers", [1, 2])
+    def test_multigraph_invalid_parallel_edge_weight_raises(self, workers):
+        """Every parallel edge weight should be validated, not just the aggregate."""
+        graph = nx.MultiGraph()
+        graph.add_edge("a", "b", weight=2.0)
+        graph.add_edge("a", "b", weight=0.0)
+
+        with pytest.raises(ValueError, match="Edge weight"):
+            Node2Vec(
+                graph,
+                dimensions=8,
+                walk_length=3,
+                num_walks=1,
+                workers=workers,
+                quiet=True,
+                weight_key="weight",
+                seed=42,
+            )
+
+    @pytest.mark.parametrize("workers", [1, 2])
+    @pytest.mark.parametrize("weight", [0.0, -1.0, float("nan"), float("inf")])
+    def test_invalid_edge_weights_raise_clear_error(self, workers, weight):
+        """Invalid weights should fail before transition probabilities become NaN/Inf."""
+        graph = nx.Graph()
+        graph.add_edge("a", "b", weight=weight)
+        graph.add_edge("b", "c", weight=1.0)
+
+        with pytest.raises(ValueError, match="Edge weight"):
+            Node2Vec(
+                graph,
+                dimensions=8,
+                walk_length=3,
+                num_walks=1,
+                workers=workers,
+                quiet=True,
+                weight_key="weight",
+                seed=42,
+            )
+
+    def test_non_numeric_edge_weight_raises_clear_error(self):
+        graph = nx.Graph()
+        graph.add_edge("a", "b", weight="heavy")
+
+        with pytest.raises(ValueError, match="Edge weight"):
+            Node2Vec(
+                graph,
+                dimensions=8,
+                walk_length=3,
+                num_walks=1,
+                workers=1,
+                quiet=True,
+                weight_key="weight",
+                seed=42,
+            )
+
+    @pytest.mark.parametrize("param", ["p", "q"])
+    @pytest.mark.parametrize("value", [0.0, -1.0, float("nan"), float("inf")])
+    def test_invalid_global_p_q_raise_clear_error(self, small_graph, param, value):
+        kwargs = {"p": 1.0, "q": 1.0, param: value}
+
+        with pytest.raises(ValueError, match=param):
+            Node2Vec(
+                small_graph,
+                dimensions=8,
+                walk_length=3,
+                num_walks=1,
+                workers=1,
+                quiet=True,
+                seed=42,
+                **kwargs,
+            )
+
+    @pytest.mark.parametrize("workers", [1, 2])
+    @pytest.mark.parametrize("param", ["p", "q"])
+    @pytest.mark.parametrize("value", [0.0, -1.0, float("nan"), float("inf")])
+    def test_invalid_sampling_strategy_p_q_raise_clear_error(self, workers, param, value):
+        graph = nx.Graph()
+        graph.add_edges_from([("a", "b"), ("b", "c")])
+        sampling_strategy = {"b": {param: value}}
+
+        with pytest.raises(ValueError, match="sampling_strategy"):
+            Node2Vec(
+                graph,
+                dimensions=8,
+                walk_length=3,
+                num_walks=1,
+                workers=workers,
+                sampling_strategy=sampling_strategy,
+                quiet=True,
+                seed=42,
+            )
+
+    @pytest.mark.parametrize("param", ["p", "q"])
+    def test_invalid_unused_sampling_strategy_p_q_raise_clear_error(self, param):
+        """Invalid supplied p/q values should fail even if the node is unused."""
+        graph = nx.path_graph(3)
+        sampling_strategy = {"unused": {param: 0.0}}
+
+        with pytest.raises(ValueError, match="sampling_strategy"):
+            Node2Vec(
+                graph,
+                dimensions=8,
+                walk_length=3,
+                num_walks=1,
+                workers=1,
+                sampling_strategy=sampling_strategy,
+                quiet=True,
+                seed=42,
+            )
+
+    def test_non_dict_sampling_strategy_entry_raises_clear_error(self, small_graph):
+        with pytest.raises(ValueError, match="sampling_strategy"):
+            Node2Vec(
+                small_graph,
+                dimensions=8,
+                walk_length=3,
+                num_walks=1,
+                workers=1,
+                sampling_strategy={0: "invalid"},
+                quiet=True,
+                seed=42,
+            )
     
     def test_empty_graph_error(self):
         """Test that empty graph raises appropriate error."""
@@ -161,4 +310,3 @@ class TestNode2Vec:
         # Empty graph should still work, but generate no walks
         node2vec = Node2Vec(graph, dimensions=8, walk_length=3, num_walks=1, workers=1, quiet=True)
         assert len(node2vec.walks) == 0
-

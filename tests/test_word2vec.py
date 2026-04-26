@@ -43,6 +43,23 @@ class TestWord2Vec:
         assert "common" in model.wv
         assert "rare_word" not in model.wv
 
+    def test_negative_sampling_small_vocab_does_not_hang(self):
+        """negative can exceed available non-target words without hanging."""
+        sentences = [["a", "b"]] * 3
+        model = Word2Vec(sentences, vector_size=8, min_count=1, epochs=1, negative=5, seed=42)
+
+        assert model.wv is not None
+        assert "a" in model.wv
+        assert "b" in model.wv
+
+    def test_negative_sampling_distribution_is_vocab_sized(self):
+        sentences = [["a", "b", "c", "d"]] * 3
+        model = Word2Vec(vector_size=8, min_count=1, negative=5, seed=42)
+        model.build_vocab(sentences)
+
+        assert model.negative_table_size == len(model.vocab)
+        assert model.negative_table.nbytes <= len(model.vocab) * np.dtype(np.float64).itemsize
+
     def test_train_without_vocab_raises(self):
         model = Word2Vec(vector_size=8, seed=42)
         with pytest.raises(ValueError, match="Vocabulary is empty"):

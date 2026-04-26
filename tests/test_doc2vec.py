@@ -98,3 +98,20 @@ class TestDoc2Vec:
 
         assert "common" in model.vocab
         assert "rare" not in model.vocab
+
+    def test_negative_sampling_small_vocab_does_not_hang(self):
+        """negative can exceed available non-target words without hanging."""
+        docs = [TaggedDocument(words=["a", "b"], tags=["0"])]
+        model = Doc2Vec(docs, vector_size=8, min_count=1, epochs=1, negative=5, seed=42, workers=1)
+
+        assert model.wv is not None
+        assert model.dv is not None
+        assert "0" in model.dv
+
+    def test_negative_sampling_distribution_is_vocab_sized(self):
+        docs = [TaggedDocument(words=["a", "b", "c", "d"], tags=["0"])]
+        model = Doc2Vec(vector_size=8, min_count=1, negative=5, seed=42, workers=1)
+        model.build_vocab(docs)
+
+        assert model.negative_table_size == len(model.vocab)
+        assert model.negative_table.nbytes <= len(model.vocab) * np.dtype(np.float64).itemsize

@@ -8,7 +8,14 @@ import numpy as np
 from joblib import Parallel, delayed
 from tqdm.auto import tqdm
 
-from .parallel import parallel_generate_walks, parallel_precompute_probabilities
+from .parallel import (
+    get_edge_weight,
+    get_sampling_value,
+    normalize_probabilities,
+    parallel_generate_walks,
+    parallel_precompute_probabilities,
+    validate_positive_number,
+)
 from .word2vec import Word2Vec
 
 
@@ -58,8 +65,8 @@ class Node2Vec:
         self.dimensions = dimensions
         self.walk_length = walk_length
         self.num_walks = num_walks
-        self.p = p
-        self.q = q
+        self.p = validate_positive_number(p, "p")
+        self.q = validate_positive_number(q, "q")
         self.weight_key = weight_key
         self.workers = workers
         self.quiet = quiet
@@ -69,6 +76,7 @@ class Node2Vec:
             self.sampling_strategy = {}
         else:
             self.sampling_strategy = sampling_strategy
+            self._validate_sampling_strategy()
 
         self.temp_folder, self.require = None, None
         if temp_folder:
@@ -84,6 +92,15 @@ class Node2Vec:
 
         self._precompute_probabilities()
         self.walks = self._generate_walks()
+
+    def _validate_sampling_strategy(self):
+        """Validate node-specific p/q overrides eagerly."""
+        for node, strategy in self.sampling_strategy.items():
+            if not isinstance(strategy, dict):
+                raise ValueError(f"sampling_strategy[{node!r}] must be a dictionary")
+            for key in (self.P_KEY, self.Q_KEY):
+                if key in strategy:
+                    validate_positive_number(strategy[key], f"sampling_strategy[{node!r}][{key!r}]")
 
     def _precompute_probabilities(self):
         """
@@ -175,19 +192,10 @@ class Node2Vec:
             # Calculate unnormalized weights
             for destination in self.graph.neighbors(current_node):
 
-                p = self.sampling_strategy[current_node].get(self.P_KEY, self.p) if current_node in self.sampling_strategy else self.p
-                q = self.sampling_strategy[current_node].get(self.Q_KEY, self.q) if current_node in self.sampling_strategy else self.q
+                p = get_sampling_value(self.sampling_strategy, current_node, self.P_KEY, self.p)
+                q = get_sampling_value(self.sampling_strategy, current_node, self.Q_KEY, self.q)
 
-                try:
-                    if self.graph[current_node][destination].get(self.weight_key):
-                        weight = self.graph[current_node][destination].get(self.weight_key, 1)
-                    else:
-                        ## Example : AtlasView({0: {'type': 1, 'weight':0.1}})- when we have edge weight
-                        edge = list(self.graph[current_node][destination])[-1]
-                        weight = self.graph[current_node][destination][edge].get(self.weight_key, 1)
-
-                except Exception:
-                    weight = 1
+                weight = get_edge_weight(self.graph, current_node, destination, self.weight_key)
 
                 if destination == source:  # Backwards probability
                     ss_weight = weight * 1 / p
@@ -201,21 +209,22 @@ class Node2Vec:
                 d_neighbors.append(destination)
 
             # Normalize
-            unnormalized_weights = np.array(unnormalized_weights)
-            d_graph[current_node][self.PROBABILITIES_KEY][source] = unnormalized_weights / unnormalized_weights.sum()
+            d_graph[current_node][self.PROBABILITIES_KEY][source] = normalize_probabilities(
+                unnormalized_weights,
+                context=f"transition from {source!r} through {current_node!r}",
+            )
 
         # Calculate first_travel weights for source
         first_travel_weights = []
 
         for destination in self.graph.neighbors(source):
-            try:
-                weight = self.graph[source][destination].get(self.weight_key, 1)
-            except Exception:
-                weight = 1
+            weight = get_edge_weight(self.graph, source, destination, self.weight_key)
             first_travel_weights.append(weight)
 
-        first_travel_weights = np.array(first_travel_weights)
-        d_graph[source][self.FIRST_TRAVEL_KEY] = first_travel_weights / first_travel_weights.sum()
+        d_graph[source][self.FIRST_TRAVEL_KEY] = normalize_probabilities(
+            first_travel_weights,
+            context=f"first travel from {source!r}",
+        )
 
         # Save neighbors
         d_graph[source][self.NEIGHBORS_KEY] = list(self.graph.neighbors(source))
@@ -269,5 +278,3 @@ class Node2Vec:
             skip_gram_params["sg"] = 1
 
         return Word2Vec(self.walks, **skip_gram_params)
-
-

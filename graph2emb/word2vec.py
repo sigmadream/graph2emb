@@ -139,45 +139,52 @@ class Word2Vec:
 
         # Normalize
         total = pow_counts.sum()
-        if total > 0:
+        if total > 0 and np.isfinite(total):
             pow_counts = pow_counts / total
+        else:
+            pow_counts = np.full(vocab_size, 1.0 / vocab_size, dtype=np.float64)
 
-        # Build cumulative distribution for sampling
-        self.negative_table_size = int(1e8)  # Large table for sampling
-        self.negative_table = np.zeros(self.negative_table_size, dtype=np.uint32)
-
-        cumulative = 0.0
-        idx = 0
-        for i, prob in enumerate(pow_counts):
-            cumulative += prob
-            while idx < self.negative_table_size and idx / self.negative_table_size < cumulative:
-                self.negative_table[idx] = i
-                idx += 1
-
-        # Fill remaining with last index
-        while idx < self.negative_table_size:
-            self.negative_table[idx] = vocab_size - 1
-            idx += 1
+        # Store the cumulative probability distribution instead of expanding it
+        # into a fixed 1e8-entry table. This keeps memory proportional to the
+        # vocabulary size while preserving the same sampling distribution.
+        self.negative_table_size = vocab_size
+        self.negative_table = np.cumsum(pow_counts, dtype=np.float64)
+        self.negative_table[-1] = 1.0
 
     def _get_negative_samples(self, target_idx: int, num_samples: int) -> List[int]:
         """Get negative samples (excluding target)."""
-        if not hasattr(self, "negative_table") or self.negative_table is None:
-            # Fallback: random sampling from vocabulary
-            vocab_size = len(self.vocab)
-            samples = []
-            while len(samples) < num_samples:
-                neg_idx = random.randint(0, vocab_size - 1)
-                if neg_idx != target_idx and neg_idx not in samples:
-                    samples.append(neg_idx)
-            return samples
+        vocab_size = len(self.vocab)
+        if num_samples <= 0 or vocab_size <= 1:
+            return []
 
-        samples = []
-        while len(samples) < num_samples:
-            table_idx = random.randint(0, self.negative_table_size - 1)
-            neg_idx = int(self.negative_table[table_idx])
-            if neg_idx != target_idx and neg_idx not in samples:
-                samples.append(neg_idx)
-        return samples
+        if hasattr(self, "negative_table") and self.negative_table is not None:
+            samples = []
+            attempts = 0
+            while len(samples) < num_samples and attempts < 10:
+                draws = np.searchsorted(
+                    self.negative_table,
+                    np.random.random(size=max(num_samples, 4)),
+                    side="right",
+                )
+                samples.extend(int(idx) for idx in draws if idx != target_idx and idx < vocab_size)
+                attempts += 1
+
+            if len(samples) >= num_samples:
+                return samples[:num_samples]
+
+            probabilities = np.diff(np.concatenate(([0.0], self.negative_table)))
+        else:
+            probabilities = np.ones(vocab_size, dtype=np.float64)
+
+        probabilities[target_idx] = 0.0
+        total = probabilities.sum()
+        if total <= 0 or not np.isfinite(total):
+            probabilities = np.ones(vocab_size, dtype=np.float64)
+            probabilities[target_idx] = 0.0
+            total = probabilities.sum()
+
+        probabilities /= total
+        return np.random.choice(vocab_size, size=num_samples, replace=True, p=probabilities).astype(int).tolist()
 
     def train(
         self,
@@ -322,5 +329,3 @@ class Word2Vec:
         model.index2word = wv.index_to_key
         model.word2index = {word: idx for idx, word in enumerate(model.index2word)}
         return model
-
-
