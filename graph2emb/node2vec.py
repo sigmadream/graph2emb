@@ -122,13 +122,11 @@ class Node2Vec:
 
             if not self.quiet:
                 # Show progress bar for parallel processing
-                nodes_generator = tqdm(nodes_list, desc="Computing transition probabilities")
-            else:
-                nodes_generator = nodes_list
+                pbar = tqdm(total=len(nodes_list), desc="Computing transition probabilities")
 
             # Process nodes in parallel
-            # Note: tqdm progress may not update smoothly in parallel mode, but will show completion
-            results = Parallel(n_jobs=self.workers, temp_folder=self.temp_folder, require=self.require)(
+            results = []
+            for result in Parallel(n_jobs=self.workers, temp_folder=self.temp_folder, require=self.require, return_as="generator")(
                 delayed(parallel_precompute_probabilities)(
                     source,
                     self.graph,
@@ -139,11 +137,14 @@ class Node2Vec:
                     self.PROBABILITIES_KEY,
                 )
                 for source in nodes_list
-            )
+            ):
+                results.append(result)
+                if not self.quiet:
+                    pbar.update(1)
 
             # Close progress bar if used
             if not self.quiet:
-                nodes_generator.close()
+                pbar.close()
 
             # Merge results into d_graph
             for source, result in zip(nodes_list, results):
